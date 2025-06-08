@@ -1,12 +1,15 @@
 package com.myutil;
 
-import com.opencsv.CSVReader;
-
-import java.io.*;
+import java.io.FileReader;
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.Socket;
-import java.sql.*;
-import java.time.LocalDateTime;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+
+import com.opencsv.CSVReader;
 
 /**
  * 
@@ -37,10 +40,14 @@ public class TelnetChecker {
                 String serverIp = nextLine[0];
                 int port = Integer.parseInt(nextLine[1]);
 
-                boolean isConnected = isPortOpen(serverIp, port, 3000);
-                System.out.printf("%d. %s:%d [%s][%s][%s][%s] ---> %s\n", seq++,  serverIp, port, nextLine[2], nextLine[3], nextLine[4], nextLine[5], isConnected ? "성공" : "실패");
+                String resultCd = "fail";
+                String resultMsg = isPortOpen(serverIp, port, 3000);
+                if("success".equals(resultMsg.toLowerCase())) 
+                	resultCd = resultMsg;
+                	
+                System.out.printf("%d. %s:%d [%s][%s][%s][%s] ---> %s\n", seq++,  serverIp, port, nextLine[2], nextLine[3], nextLine[4], nextLine[5], resultMsg);
 
-                saveResult(conn, serverIp, port, isConnected, clientIp);
+                saveResult(conn, serverIp, port, clientIp, resultCd, resultMsg);
             }
 
             System.out.println("모든 검사 완료 및 DB 저장됨.");
@@ -50,23 +57,24 @@ public class TelnetChecker {
         }
     }
 
-    private static boolean isPortOpen(String ip, int port, int timeoutMillis) {
+    private static String isPortOpen(String ip, int port, int timeoutMillis) {
         try (Socket socket = new Socket()) {
             socket.connect(new java.net.InetSocketAddress(ip, port), timeoutMillis);
-            return true;
+            return "success";
         } catch (IOException e) {
-            return false;
+            return e.getMessage();
         }
     }
 
-    private static void saveResult(Connection conn, String ip, int port, boolean reachable, String clientIp) throws SQLException {
-        String sql = "INSERT INTO telnet_results (server_ip, port, is_connected, checked_at, client_ip) VALUES (?, ?, ?, ?, ?)";
+    private static void saveResult(Connection conn, String ip, int port, String clientIp, String resultCd, String resultMsg) throws SQLException {
+        String sql = "INSERT INTO servers_connect_his (server_ip, port, connect_method, user_pc_ip, return_code, return_desc) VALUES (?, ?, ?, ?, ?, ?)";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, ip);
             stmt.setInt(2, port);
-            stmt.setBoolean(3, reachable);
-            stmt.setTimestamp(4, Timestamp.valueOf(LocalDateTime.now()));
-            stmt.setString(5, clientIp);
+            stmt.setString(3, "telnet");
+            stmt.setString(4, clientIp);
+            stmt.setString(5, resultCd);
+            stmt.setString(6, resultMsg);
             stmt.executeUpdate();
         }
     }
