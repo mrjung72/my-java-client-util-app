@@ -1,39 +1,49 @@
-
 package com.myutil;
 
 import com.opencsv.CSVReader;
+
 import java.io.*;
+import java.net.InetAddress;
 import java.net.Socket;
-import java.nio.charset.StandardCharsets;
 import java.sql.*;
 import java.time.LocalDateTime;
-import java.util.Properties;
 
+/**
+ * 
+ */
 public class TelnetChecker {
 
+    private static final String DB_URL = "jdbc:mariadb://localhost:3306/mydb";
+    private static final String DB_USER = "user";
+    private static final String DB_PASS = "password";
+
     public static void main(String[] args) {
-        if (args.length < 1) {
-            System.err.println("CSV 파일명을 인자로 입력하세요. 예) java -jar telnet-checker.jar servers.csv");
+        if (args.length != 1) {
+            System.err.println("CSV 파일명을 인자로 입력하세요. ex) java -jar my-java-client-util-app-1.0-SNAPSHOT.jar com.myutil.TelnetChecker server.csv");
             System.exit(1);
         }
 
         String csvFile = args[0];
-        String localIp = getLocalIp();
+        String clientIp = getLocalIp();
 
-        try (CSVReader reader = new CSVReader(new InputStreamReader(new FileInputStream(csvFile), StandardCharsets.UTF_8));
-             Connection conn = getConnection()) {
+        try (CSVReader reader = new CSVReader(new FileReader(csvFile));
+             Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASS)) {
 
             String[] nextLine;
+            reader.readNext(); // skip header
+            int seq = 1;
+
             while ((nextLine = reader.readNext()) != null) {
-                if (nextLine.length < 2) continue;
+                String serverIp = nextLine[0];
+                int port = Integer.parseInt(nextLine[1]);
 
-                String ip = nextLine[0].trim();
-                int port = Integer.parseInt(nextLine[1].trim());
-                boolean reachable = isPortOpen(ip, port, 3000);
+                boolean isConnected = isPortOpen(serverIp, port, 3000);
+                System.out.printf("%d. %s:%d [%s][%s][%s][%s] ---> %s\n", seq++,  serverIp, port, nextLine[2], nextLine[3], nextLine[4], nextLine[5], isConnected ? "성공" : "실패");
 
-                saveResult(conn, ip, port, reachable, localIp);
-                System.out.printf("Checked %s:%d - %s%n", ip, port, reachable ? "OPEN" : "CLOSED");
+                saveResult(conn, serverIp, port, isConnected, clientIp);
             }
+
+            System.out.println("모든 검사 완료 및 DB 저장됨.");
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -49,19 +59,8 @@ public class TelnetChecker {
         }
     }
 
-    private static Connection getConnection() throws Exception {
-        Properties props = new Properties();
-        try (InputStream input = new FileInputStream("config.properties")) {
-            props.load(input);
-        }
-        String url = props.getProperty("db.url");
-        String user = props.getProperty("db.username");
-        String pass = props.getProperty("db.password");
-        return DriverManager.getConnection(url, user, pass);
-    }
-
     private static void saveResult(Connection conn, String ip, int port, boolean reachable, String clientIp) throws SQLException {
-        String sql = "INSERT INTO telnet_results (ip, port, is_open, checked_at, client_ip) VALUES (?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO telnet_results (server_ip, port, is_connected, checked_at, client_ip) VALUES (?, ?, ?, ?, ?)";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, ip);
             stmt.setInt(2, port);
@@ -74,7 +73,7 @@ public class TelnetChecker {
 
     private static String getLocalIp() {
         try {
-            return java.net.InetAddress.getLocalHost().getHostAddress();
+            return InetAddress.getLocalHost().getHostAddress();
         } catch (Exception e) {
             return "unknown";
         }
